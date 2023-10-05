@@ -2,9 +2,10 @@ import org.json.JSONObject;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.*;
 
 public class Program {
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws InterruptedException {
 
         // Начальная инициализация
         Params params = new Params();
@@ -56,8 +57,16 @@ public class Program {
             excFilter = null;
         }
 
+        if (params.getThread() == null) {
+            params.setThread(1);
+        }
+
+        // Создаётся пул, который начинает с 1 потока и растёт до params.getThread()
+        ExecutorService pool = getPool(params.getThread());
         // Запуск сбора статистики
-        getInfo(extInfo, dir, params.getRecursively(), params.getDepth(), incFilter, excFilter);
+        getInfo(extInfo, dir, params.getRecursively(), params.getDepth(), incFilter, excFilter, pool);
+        pool.shutdown();
+        pool.awaitTermination(30, TimeUnit.SECONDS);
 
         // Вывод результатов
         System.out.println("Собранная статистика: ");
@@ -71,28 +80,49 @@ public class Program {
             }
         }
     }
+
+    private static ExecutorService getPool(int threadCount) {
+        final LinkedBlockingDeque<Runnable> queue = new LinkedBlockingDeque<>(threadCount);
+        return new ThreadPoolExecutor(threadCount, threadCount, 0L, TimeUnit.MILLISECONDS, queue,
+                (r, executor) -> {
+                    try {
+                        queue.put(r);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+    }
+
     private static void getInfo(Map<String, Info> map,
                                 File dir,
                                 Boolean recursively,
                                 Integer depth,
                                 List<String> incFilter,
-                                List<String> excFilter) throws IOException {
+                                List<String> excFilter,
+                                ExecutorService pool) {
 
         if (depth == 0) {
             return;
         }
 
-        // Получаем все вложенные файлы в каталоге
+        // Обход дерева выполняется в основном потоке
         if (dir.listFiles() != null) {
             for (File item : dir.listFiles()) {
                 if (item.isDirectory()) {
                     if (recursively != null) {
                         // Запоминаем текущую глубину
                         Integer curDepth = depth;
-                        getInfo(map, item, recursively, --curDepth, incFilter, excFilter);
+                        getInfo(map, item, recursively, --curDepth, incFilter, excFilter, pool);
                     }
                 } else {
-                    saveInfo(map, item, incFilter, excFilter);
+                    // Сохранение информации обрабатывается в пуле
+                    pool.submit(() -> {
+                        try {
+                            saveInfo(map, item, incFilter, excFilter);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
                 }
             }
         }
