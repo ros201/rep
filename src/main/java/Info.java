@@ -33,7 +33,7 @@ public class Info {
         return commentsCount;
     }
 
-    public void addItemInfo(Long size, Long allLinesCount, Long notEmptyLinesCount, Long commentsCount) {
+    public synchronized void addItemInfo(Long size, Long allLinesCount, Long notEmptyLinesCount, Long commentsCount) {
         this.filesCount += 1;
         this.size += size;
         this.allLinesCount += allLinesCount;
